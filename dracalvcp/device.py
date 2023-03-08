@@ -142,4 +142,11 @@ class Device:
         
         with self.data_lock:
             return self.co2
-        
+
+    def disable_vcp_mode(self):
+        """Disable VCP mode and convert back to USB mode."""
+        self.send_string('PROTOCOL USB')
+
+    def restart(self):
+        """Restart device."""
+        self.send_string('RESET')
