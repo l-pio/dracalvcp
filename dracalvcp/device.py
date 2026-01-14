@@ -1,35 +1,31 @@
-import serial
-import threading
+from serial import Serial, SerialException
+from threading import Event, Thread, Lock
 from libscrc import xmodem
 
 
 class Device:
-    """Atmospheric-sensor device."""
+    """Dracal VCP device class."""
     DEFAULT_TIMEOUT = 2
 
     def __init__(self, comport, product=None, serial_id=None):
-        """Open a connection to a device via comport."""
-        # Initialize serial device
-        self._serial_device = serial.Serial(comport, baudrate=115200, timeout=self.DEFAULT_TIMEOUT)
-
-        # Product / serial ID
         self.product = product
         self.serial_id = serial_id
-        
-        # Data
-        self.data_lock = threading.Lock()
-        self.press_initialized = threading.Event()
+
+        self.data_lock = Lock()
+        self.press_initialized = Event()
         self.press = None
-        self.temp_initialized = threading.Event()
+        self.temp_initialized = Event()
         self.temp = None
-        self.hum_initialized = threading.Event()
+        self.hum_initialized = Event()
         self.hum = None
-        self.co2_initialized = threading.Event()
+        self.co2_initialized = Event()
         self.co2 = None
 
-        # Start reader thread
-        self._stop_reader_thread = threading.Event()
-        self._reader_thread_handle = threading.Thread(target=self._reader_thread, daemon=True)
+        # Open serial device and start reader thread
+        self._serial_device = Serial(comport, baudrate=115200, timeout=self.DEFAULT_TIMEOUT)
+
+        self._stop_reader_thread = Event()
+        self._reader_thread_handle = Thread(target=self._reader_thread, daemon=True)
         self._reader_thread_handle.start()
 
     def __enter__(self):
@@ -39,16 +35,14 @@ class Device:
         self.close()
     
     def close(self):
-        """Close the connection to the device."""
-        # Join reader thread
+        """Join reader thread and close device connection."""
         self._stop_reader_thread.set()
         self._reader_thread_handle.join()
-        
-        # Close serial connection
+
         self._serial_device.close()
 
     def _send_string(self, string):
-        """Send a string to the device."""
+        """Send string to the device."""
         self._serial_device.write((string + '\r').encode('ascii'))
   
     def _receive_string(self):
@@ -60,7 +54,7 @@ class Device:
         while not self._stop_reader_thread.is_set():
             try:
                 string_in = self._receive_string()
-            except serial.SerialException:
+            except SerialException:
                 self._serial_device.close()
                 self._stop_reader_thread.set()
                 continue
@@ -162,12 +156,12 @@ class Device:
         """Disable VCP mode and convert back to USB mode."""
         try:
             self._send_string('PROTOCOL USB')
-        except serial.SerialException as e:
+        except SerialException as e:
             raise ConnectionError(f'Serial connection error: {e}')
 
     def restart(self):
         """Restart device."""
         try:
             self._send_string('RESET')
-        except serial.SerialException as e:
+        except SerialException as e:
             raise ConnectionError(f'Serial connection error: {e}')
