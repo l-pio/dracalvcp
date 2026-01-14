@@ -8,7 +8,7 @@ if __name__ == '__main__':
         temp = device.get_temp()
         hum = device.get_hum()
         
-        print('p=%d Pa, T=%.2f °C, C=%.2f %%' % (press, temp, hum))
+        print('p=%d Pa, T=%.2f °C, H=%.2f %%' % (press, temp, hum))
     
     # Dracal DXC100 (carbon dioxide sensor)
     with dracalvcp.Device('COM5') as device:
