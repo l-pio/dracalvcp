@@ -27,10 +27,10 @@ class Device:
         self.hum = None
         self.co2_initialized = threading.Event()
         self.co2 = None
-        
+
         # Start reader thread
         self.stop_reader_thread = threading.Event()
-        self.reader_thread_handle = threading.Thread(target=self.reader_thread)
+        self.reader_thread_handle = threading.Thread(target=self.reader_thread, daemon=True)
         self.reader_thread_handle.start()
     
     def __enter__(self):
@@ -111,7 +111,7 @@ class Device:
             return self.press
         
     def get_temp(self):  # (°C)
-        """Get atmosperhic temperature.
+        """Get atmospheric temperature.
 
         Returns: temperature (°C)
         """
@@ -122,7 +122,7 @@ class Device:
             return self.temp
         
     def get_hum(self):  # (%)
-        """Get relative humdity.
+        """Get relative humidity.
 
         Returns: rel. humidity (%)
         """
