@@ -1,6 +1,5 @@
 import serial
 import threading
-from contextlib import suppress
 from libscrc import xmodem
 
 
@@ -11,7 +10,7 @@ class Device:
     def __init__(self, comport, product=None, serial_id=None):
         """Open a connection to a device via comport."""
         # Initialize serial device
-        self.serial_device = serial.Serial(comport, baudrate=115200, timeout=self.DEFAULT_TIMEOUT)
+        self._serial_device = serial.Serial(comport, baudrate=115200, timeout=self.DEFAULT_TIMEOUT)
 
         # Product / serial ID
         self.product = product
@@ -29,9 +28,9 @@ class Device:
         self.co2 = None
 
         # Start reader thread
-        self.stop_reader_thread = threading.Event()
-        self.reader_thread_handle = threading.Thread(target=self.reader_thread, daemon=True)
-        self.reader_thread_handle.start()
+        self._stop_reader_thread = threading.Event()
+        self._reader_thread_handle = threading.Thread(target=self._reader_thread, daemon=True)
+        self._reader_thread_handle.start()
 
     def __enter__(self):
         return self
@@ -42,26 +41,28 @@ class Device:
     def close(self):
         """Close the connection to the device."""
         # Join reader thread
-        self.stop_reader_thread.set()
-        self.reader_thread_handle.join()
+        self._stop_reader_thread.set()
+        self._reader_thread_handle.join()
         
         # Close serial connection
-        self.serial_device.close()
+        self._serial_device.close()
 
     def _send_string(self, string):
         """Send a string to the device."""
-        self.serial_device.write((string+'\r').encode('ascii'))
+        self._serial_device.write((string + '\r').encode('ascii'))
   
     def _receive_string(self):
         """Receive string from a device."""
-        return self.serial_device.readline().decode('ascii').rstrip()
+        return self._serial_device.readline().decode('ascii').rstrip()
 
-    def reader_thread(self):
+    def _reader_thread(self):
         """Start main loop of reader."""
-        # Reader main loop
-        while not self.stop_reader_thread.is_set():
-            string_in = self._receive_string()
-            if not string_in:
+        while not self._stop_reader_thread.is_set():
+            try:
+                string_in = self._receive_string()
+            except serial.SerialException:
+                self._serial_device.close()
+                self._stop_reader_thread.set()
                 continue
 
             # Parse data
@@ -106,30 +107,39 @@ class Device:
 
         Returns: pressure (Pa)
         """
+        if not self._reader_thread_handle.is_alive():
+            raise RuntimeError("Device thread not running (connection lost?)")
+
         if not self.press_initialized.wait(timeout=self.DEFAULT_TIMEOUT):
-            raise TimeoutError('Timeout while waiting for data!')
+            raise TimeoutError('Timeout while waiting for data')
             
         with self.data_lock:
             return self.press
         
-    def get_temp(self):  # (°C)
+    def get_temp(self):
         """Get atmospheric temperature.
 
         Returns: temperature (°C)
         """
+        if not self._reader_thread_handle.is_alive():
+            raise RuntimeError("Device thread not running (connection lost?)")
+
         if not self.temp_initialized.wait(timeout=self.DEFAULT_TIMEOUT):
-            raise TimeoutError('Timeout while waiting for data!')
+            raise TimeoutError('Timeout while waiting for data')
         
         with self.data_lock:
             return self.temp
         
-    def get_hum(self):  # (%)
+    def get_hum(self):
         """Get relative humidity.
 
         Returns: rel. humidity (%)
         """
+        if not self._reader_thread_handle.is_alive():
+            raise RuntimeError("Device thread not running (connection lost?)")
+
         if not self.hum_initialized.wait(timeout=self.DEFAULT_TIMEOUT):
-            raise TimeoutError('Timeout while waiting for data!')
+            raise TimeoutError('Timeout while waiting for data')
         
         with self.data_lock:
             return self.hum
@@ -139,16 +149,25 @@ class Device:
 
         Returns: carbon dioxide concentration (ppm)
         """
+        if not self._reader_thread_handle.is_alive():
+            raise RuntimeError('Device thread not running (connection lost?)')
+
         if not self.co2_initialized.wait(timeout=self.DEFAULT_TIMEOUT):
-            raise TimeoutError('Timeout while waiting for data!')
+            raise TimeoutError('Timeout while waiting for data')
         
         with self.data_lock:
             return self.co2
 
     def disable_vcp_mode(self):
         """Disable VCP mode and convert back to USB mode."""
-        self._send_string('PROTOCOL USB')
+        try:
+            self._send_string('PROTOCOL USB')
+        except serial.SerialException as e:
+            raise ConnectionError(f'Serial connection error: {e}')
 
     def restart(self):
         """Restart device."""
-        self._send_string('RESET')
+        try:
+            self._send_string('RESET')
+        except serial.SerialException as e:
+            raise ConnectionError(f'Serial connection error: {e}')
