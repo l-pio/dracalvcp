@@ -32,7 +32,7 @@ class Device:
         self.stop_reader_thread = threading.Event()
         self.reader_thread_handle = threading.Thread(target=self.reader_thread, daemon=True)
         self.reader_thread_handle.start()
-    
+
     def __enter__(self):
         return self
     
@@ -48,11 +48,11 @@ class Device:
         # Close serial connection
         self.serial_device.close()
 
-    def send_string(self, string):
+    def _send_string(self, string):
         """Send a string to the device."""
         self.serial_device.write((string+'\r').encode('ascii'))
   
-    def receive_string(self):
+    def _receive_string(self):
         """Receive string from a device."""
         return self.serial_device.readline().decode('ascii').rstrip()
 
@@ -60,44 +60,46 @@ class Device:
         """Start main loop of reader."""
         # Reader main loop
         while not self.stop_reader_thread.is_set():
-            # Read data
-            string_in = self.receive_string()
-            if string_in != '':
-                with suppress(IndexError):  # Suppress IndexErrors while parsing
-                    # Parse data
-                    frame = string_in.split(',')
-                    line_type = frame[0]
-                    product = frame[1]
-                    serial_id = frame[2]
-                    # message = frame[3]
-                    data = {U: D for D, U, in zip(frame[4:-2:2], frame[5:-1:2])}
-                    crc16_received = int(frame[-1][1:], 16)
-                    crc16_computed = xmodem(string_in[:-5].encode('ascii'))
+            string_in = self._receive_string()
+            if not string_in:
+                continue
 
-                    if crc16_received != crc16_computed:
-                        # Invalid checksum
-                        pass
-                    elif (self.product is not None) and (self.product != product):
-                        # Invalid product ID
-                        pass
-                    elif (self.serial_id is not None) and (self.serial_id != serial_id):
-                        # Invalid serial ID
-                        pass
-                    elif line_type == 'D':
-                        # Data
-                        with self.data_lock:
-                            if 'Pa' in data:
-                                self.press = int(data['Pa'])
-                                self.press_initialized.set()
-                            if 'C' in data:
-                                self.temp = float(data['C'])
-                                self.temp_initialized.set()
-                            if '%' in data:
-                                self.hum = float(data['%'])
-                                self.hum_initialized.set()
-                            if 'ppm' in data:
-                                self.co2 = float(data['ppm'])
-                                self.co2_initialized.set()
+            # Parse data
+            try:
+                frame = string_in.split(',')
+                line_type = frame[0]
+                product = frame[1]
+                serial_id = frame[2]
+                data = {U: D for D, U, in zip(frame[4:-2:2], frame[5:-1:2])}
+                crc16_received = int(frame[-1][1:], 16)
+                crc16_computed = xmodem(string_in[:-5].encode('ascii'))
+            except IndexError:
+                continue
+
+            # Check checksum, product ID, serial ID, and line type
+            if crc16_received != crc16_computed:
+                continue
+            if (self.product is not None) and (self.product != product):
+                continue
+            if (self.serial_id is not None) and (self.serial_id != serial_id):
+                continue
+            if line_type != 'D':
+                continue
+
+            # Take data
+            with self.data_lock:
+                if 'Pa' in data:
+                    self.press = int(data['Pa'])
+                    self.press_initialized.set()
+                if 'C' in data:
+                    self.temp = float(data['C'])
+                    self.temp_initialized.set()
+                if '%' in data:
+                    self.hum = float(data['%'])
+                    self.hum_initialized.set()
+                if 'ppm' in data:
+                    self.co2 = float(data['ppm'])
+                    self.co2_initialized.set()
 
     def get_press(self):
         """Get atmospheric pressure.
@@ -145,8 +147,8 @@ class Device:
 
     def disable_vcp_mode(self):
         """Disable VCP mode and convert back to USB mode."""
-        self.send_string('PROTOCOL USB')
+        self._send_string('PROTOCOL USB')
 
     def restart(self):
         """Restart device."""
-        self.send_string('RESET')
+        self._send_string('RESET')
